@@ -7,6 +7,7 @@
 //
 
 import UIKit
+import AVFoundation
 
 class ViewController: UIViewController {
     
@@ -78,6 +79,10 @@ extension ViewController: ZHPlayerDelegate {
         }
         else {
             print("播放结束")
+            /// 循环轮播，可以添加下面代码
+            player.seek(to: kCMTimeZero, completeHandler: {
+                player.play()
+            })
         }
     }
     
