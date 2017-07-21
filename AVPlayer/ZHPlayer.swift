@@ -189,6 +189,7 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    
     /// Specifies how the video is displayed within a player layer’s bounds.
     /// The default value is `AVLayerVideoGravityResizeAspect`. See `FillMode` enum.
     public var fillMode: AVLayerVideoGravity {
@@ -214,8 +215,6 @@ public class ZHPlayer: NSObject {
         
         let imageGenerator = AVAssetImageGenerator(asset: playerAsset)
         imageGenerator.appliesPreferredTrackTransform = true
-        imageGenerator.requestedTimeToleranceBefore = kCMTimeZero;
-        imageGenerator.requestedTimeToleranceAfter = kCMTimeZero;
         
         do {
             let cgImage = try imageGenerator.copyCGImage(at: playerItem.currentTime(), actualTime: nil)
@@ -253,6 +252,7 @@ public class ZHPlayer: NSObject {
         removePlayerObservers()
         removePlayerItemObservers()
         delegate = nil
+        print("player has deinit")
     }
     
 }
