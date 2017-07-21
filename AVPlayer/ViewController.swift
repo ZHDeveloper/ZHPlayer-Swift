@@ -26,8 +26,6 @@ class ViewController: UIViewController {
         player.url = URL(string: "http://ytcdn.66boss.com/data/yuetao/video/2017/07/05/bf2d7f4f8e89a24c43287c37b862737e-640x640.mp4")
         player.prepareToPlay()
         
-        player.isMuted = true
-        
         contentView.addSubview(player.view)
         player.view.fillToSuperview()
     }
@@ -66,8 +64,7 @@ extension ViewController: ZHPlayerDelegate {
     }
     
     func playerPlaybackStateDidChange(_ player: ZHPlayer) {
-        print("播放状态改变：\(player.playbackState)")
-    }
+        print("播放状态改变：\(player.playbackState)")    }
     
     func playerBufferingStateDidChange(_ player: ZHPlayer) {
         print("缓冲状态改变：\(player.bufferingState)")
@@ -80,9 +77,9 @@ extension ViewController: ZHPlayerDelegate {
         else {
             print("播放结束")
             /// 循环轮播，可以添加下面代码
-            player.seek(to: kCMTimeZero, completeHandler: {
-                player.play()
-            })
+//            player.seek(to: kCMTimeZero, completeHandler: {
+//                player.play()
+//            })
         }
     }
     

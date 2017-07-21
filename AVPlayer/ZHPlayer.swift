@@ -116,7 +116,7 @@ public class ZHPlayer: NSObject {
     }
     
     /// The natural dimensions of the media.
-    open var naturalSize: CGSize? {
+    public var naturalSize: CGSize? {
         guard let playerItem = player.currentItem else {
             return nil
         }
