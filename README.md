@@ -35,6 +35,43 @@ player.prepareToPlay()
 ## 公开属性
 
 ```
-/// 视频文件的大小
+/// 是否自动播放，默认true
+public var shouldAutoplay: Bool = true
+/// 播放器的状态
+public var playbackState: PlaybackState = .stopped
+/// 缓冲状态
+public var bufferingState: BufferingState = .unknown 
+/// 缓存的总时间
+public var playableDuration: TimeInterval? 
+/// 是否正在播放
+public var isPlaying: Bool 
+/// 是否静音
+public var isMuted: Bool 
+/// 音量调节
+public var volume: Float 
+/// 画面的尺寸
 public var naturalSize: CGSize? 
+/// 画面填充模式
+public var fillMode: AVLayerVideoGravity 
+/// 画面的背景颜色
+public var layerBackgroundColor: UIColor = .black 
+/// 当前时间点的截图
+public var snapshotImage: UIImage? 
+
+public func prepareToPlay() {...}
+public func play() {...}    
+public func pause() {...}
+public func seek(to time: CMTime,completeHandler: (()->Void)? = nil) {...}
+
 ```
+
+## 效果图
+
+![预览图](./WechatIMG8.jpeg)
+
+
+
+## 参考资料
+
+* [Player](https://github.com/piemonte/Player)
+* [Bilibili/ijkplayer](https://github.com/Bilibili/ijkplayer)
