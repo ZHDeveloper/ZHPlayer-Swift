@@ -9,6 +9,7 @@
 import UIKit
 import AVFoundation
 
+/// Asset playback states.
 public enum PlaybackState: Int, CustomStringConvertible {
     case stopped = 0
     case playing
@@ -31,6 +32,7 @@ public enum PlaybackState: Int, CustomStringConvertible {
     }
 }
 
+/// Asset buffering states.
 public enum BufferingState: Int, CustomStringConvertible {
     case unknown = 0
     case keepUp
@@ -50,25 +52,38 @@ public enum BufferingState: Int, CustomStringConvertible {
     }
 }
 
+
+/// ZHPlayerDelegate
 @objc public protocol ZHPlayerDelegate: class {
-    // 准备播放
+    
+    /// Player is ready to play
     @objc optional func playerReadyToPlay(_ player: ZHPlayer)
-    // 播放状态改变
+    
+    /// Asset' playback state change
     @objc optional func playerPlaybackStateDidChange(_ player: ZHPlayer)
-    // 缓冲状态改变
+    
+    /// PlayerItem buffer state change
     @objc optional func playerBufferingStateDidChange(_ player: ZHPlayer)
-    // 播放结束
+    
+    
+    /// Play asset end
+    ///
+    ///   - error: whether error occur to play asset end.
     @objc optional func playerDidPlayFinish(_ player: ZHPlayer, error: Error?)
     
+    /// Player's playable duration change,buffering progress is playableDuration/duration
     @objc optional func playerBufferTimeDidChange(_ player: ZHPlayer)
     
+    /// The callback of the currentTime
     @objc optional func playerPeriodicTimeDidChange(_ player: ZHPlayer)
 }
 
 public class ZHPlayer: NSObject {
     
     public weak var delegate: ZHPlayerDelegate?
+    
 
+    /// Local or remote URL for the file asset to be played.
     public var url: URL? {
         didSet {
             guard let url = url else { return }
@@ -76,14 +91,23 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    
+    /// View of the player.
     public let view: ZHPlayerView = ZHPlayerView(frame: CGRect.zero)
     
+    
+    /// After prepareToPlay if shouldAutoplay is true,player will auto to play
+    /// else you should implement ZHPlayerDelegate‘playerReadyToPlay to manual play
     public var shouldAutoplay: Bool = true
     
+    
+    /// Player' current playback time
     public var currentTime: TimeInterval {
         return CMTimeGetSeconds(player.currentTime())
     }
     
+    
+    /// The duration of the asset
     public var duration: TimeInterval? {
         if let durationTime = playerItem?.duration {
             return CMTimeGetSeconds(durationTime)
@@ -91,6 +115,16 @@ public class ZHPlayer: NSObject {
         return nil
     }
     
+    /// The natural dimensions of the media.
+    open var naturalSize: CGSize? {
+        guard let playerItem = player.currentItem else {
+            return nil
+        }
+        let track = playerItem.asset.tracks(withMediaType: AVMediaType.video)[0]
+        return track.naturalSize
+    }
+    
+    /// Total buffer duration
     public var playableDuration: TimeInterval? {
         
         guard let playerItem = player.currentItem else { return nil }
@@ -105,6 +139,8 @@ public class ZHPlayer: NSObject {
         return startSec + endSec
     }
     
+    
+    /// Playback state
     public var playbackState: PlaybackState = .stopped {
         didSet {
             if playbackState != oldValue {
@@ -113,6 +149,8 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    
+    /// Buffer state
     public var bufferingState: BufferingState = .unknown {
         didSet {
             if bufferingState != oldValue {
@@ -121,6 +159,8 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    
+    /// Whether player is playing
     public var isPlaying: Bool {
         if player.currentItem != nil, player.rate != 0 {
             return true
@@ -128,6 +168,7 @@ public class ZHPlayer: NSObject {
         return false
     }
     
+    /// Mutes audio playback when true.
     public var isMuted: Bool {
         get {
             return player.isMuted
@@ -137,6 +178,8 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    
+    /// Volume for the player, ranging from 0.0 to 1.0 on a linear scale.
     public var volume: Float {
         get {
             return player.volume
@@ -146,6 +189,8 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    /// Specifies how the video is displayed within a player layer’s bounds.
+    /// The default value is `AVLayerVideoGravityResizeAspect`. See `FillMode` enum.
     public var fillMode: AVLayerVideoGravity {
         get {
             return view.playerLayer.videoGravity
@@ -155,6 +200,8 @@ public class ZHPlayer: NSObject {
         }
     }
     
+    
+    /// Player view's initial background color.
     public var layerBackgroundColor: UIColor = .black {
         didSet {
             view.playerLayer.backgroundColor = layerBackgroundColor.cgColor
