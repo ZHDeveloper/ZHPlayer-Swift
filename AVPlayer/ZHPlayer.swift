@@ -173,6 +173,7 @@ public class ZHPlayer: NSObject {
     
     /// 暂停
     public func pause() {
+        guard let _ = player.currentItem else { return }
         guard playbackState != .pause else { return }
         playbackState = .pause
         player.pause()
