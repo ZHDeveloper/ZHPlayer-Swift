@@ -1,175 +1,102 @@
 //
 //  ZHPlayer.swift
-//  AVPlayer
+//  FontDemo
 //
-//  Created by ZhiHua Shen on 2017/7/19.
+//  Created by ZhiHua Shen on 2017/12/28.
 //  Copyright © 2017年 ZhiHua Shen. All rights reserved.
 //
 
 import UIKit
-import AVFoundation
+import AVKit
 
-/// Asset playback states.
-public enum PlaybackState: Int, CustomStringConvertible {
-    case stopped = 0
-    case playing
-    case paused
-    case failed
-    
-    public var description: String {
-        get {
-            switch self {
-            case .stopped:
-                return "Stopped"
-            case .playing:
-                return "Playing"
-            case .failed:
-                return "Failed"
-            case .paused:
-                return "Paused"
-            }
-        }
-    }
-}
-
-/// Asset buffering states.
-public enum BufferingState: Int, CustomStringConvertible {
-    case unknown = 0
-    case keepUp
-    case stalled
-    
-    public var description: String {
-        get {
-            switch self {
-            case .unknown:
-                return "Unknown"
-            case .keepUp:
-                return "KeepUp"
-            case .stalled:
-                return "Stalled"
-            }
-        }
-    }
-}
-
-
-/// ZHPlayerDelegate
-@objc public protocol ZHPlayerDelegate: class {
-    
-    /// Player is ready to play
-    @objc optional func playerReadyToPlay(_ player: ZHPlayer)
-    
-    /// Asset' playback state change
+@objc public protocol ZHPlayerDelegate: NSObjectProtocol {
+    @objc optional func playerReady(_ player: ZHPlayer)
     @objc optional func playerPlaybackStateDidChange(_ player: ZHPlayer)
-    
-    /// PlayerItem buffer state change
     @objc optional func playerBufferingStateDidChange(_ player: ZHPlayer)
-    
-    
-    /// Play asset end
-    ///
-    ///   - error: whether error occur to play asset end.
-    @objc optional func playerDidPlayFinish(_ player: ZHPlayer, error: Error?)
-    
-    /// Player's playable duration change,buffering progress is playableDuration/duration
-    @objc optional func playerBufferTimeDidChange(_ player: ZHPlayer)
-    
-    /// The callback of the currentTime
-    @objc optional func playerPeriodicTimeDidChange(_ player: ZHPlayer)
+    @objc optional func playerBufferTimeDidChange(_ bufferTime: TimeInterval)
+    @objc optional func playerCurrentTimeDidChange(_ player: ZHPlayer)
+    @objc optional func playerPlaybackDidEnd(_ player: ZHPlayer)
+}
+
+private extension ZHPlayer {
+    struct PlayerKey {
+        static let tracks = "tracks"
+        static let playable = "playable"
+        static let duration = "duration"
+        static let rate = "rate"
+        static let status = "status"
+        static let emptyBuffer = "playbackBufferEmpty"
+        static let keepUp = "playbackLikelyToKeepUp"
+        static let loadedTime = "loadedTimeRanges"
+    }
 }
 
 public class ZHPlayer: NSObject {
     
+    public enum PlaybackState: String, CustomStringConvertible {
+        case stopped,playing,pause,fail
+        public var description: String {
+            return self.rawValue
+        }
+    }
+    
+    public enum BufferingState: String, CustomStringConvertible {
+        case unknown //初始化默认状态
+        case playable //检查asset时,判断URL是否可播放
+        case through //缓存完成,此状态下会自动播放，autoplay = true
+        case stalled //正在缓冲,此状态下会自动暂停，autoplay = true
+        public var description: String {
+            return self.rawValue
+        }
+    }
+    
+    /// 代理
     public weak var delegate: ZHPlayerDelegate?
     
+    /// 视频的播放状态
+    public var playbackState: ZHPlayer.PlaybackState = .stopped {
+        didSet {
+            guard playbackState != oldValue else { return }
+            self.delegate?.playerPlaybackStateDidChange?(self)
+        }
+    }
+    
+    /// 缓冲状态改变
+    public var bufferingState: ZHPlayer.BufferingState = .unknown {
+        didSet {
+            guard bufferingState != oldValue else { return }
+            self.delegate?.playerBufferingStateDidChange?(self)
+        }
+    }
 
-    /// Local or remote URL for the file asset to be played.
+    /// 播放地址
     public var url: URL? {
         didSet {
             guard let url = url else { return }
-            setup(url: url)
+            validateAsset(AVAsset(url: url))
         }
     }
     
+    /// 播放器视图
+    public let view = ZHPlayerView(frame: CGRect.zero)
     
-    /// View of the player.
-    public let view: ZHPlayerView = ZHPlayerView(frame: CGRect.zero)
+    /// 自定播放
+    public var autoplay: Bool = true
     
+    /// 失去焦点时暂停
+    public var pausesWhenResigningActive: Bool = true
     
-    /// After prepareToPlay if shouldAutoplay is true,player will auto to play
-    /// else you should implement ZHPlayerDelegate‘playerReadyToPlay to manual play
-    public var shouldAutoplay: Bool = true
+    /// 进入后台时暂停
+    public var pausesWhenBackgrounded: Bool = true
     
+    /// 获得焦点时播放
+    public var resumesWhenBecameActive: Bool = true
     
-    /// Player' current playback time
-    public var currentTime: TimeInterval {
-        return CMTimeGetSeconds(player.currentTime())
-    }
+    /// 进入前台时播放
+    public var resumesWhenEnteringForeground: Bool = true
     
-    
-    /// The duration of the asset
-    public var duration: TimeInterval? {
-        if let durationTime = playerItem?.duration {
-            return CMTimeGetSeconds(durationTime)
-        }
-        return nil
-    }
-    
-    /// The natural dimensions of the media.
-    public var naturalSize: CGSize? {
-        guard let playerItem = player.currentItem else {
-            return nil
-        }
-        let track = playerItem.asset.tracks(withMediaType: AVMediaType.video)[0]
-        return track.naturalSize
-    }
-    
-    /// Total buffer duration
-    public var playableDuration: TimeInterval? {
-        
-        guard let playerItem = player.currentItem else { return nil }
-        
-        let ranges = playerItem.loadedTimeRanges
-        guard ranges.count > 0 else { return nil }
-        
-        let timeRange = ranges.first!.timeRangeValue
-        let startSec = CMTimeGetSeconds(timeRange.start)
-        let endSec = CMTimeGetSeconds(timeRange.end)
-        
-        return startSec + endSec
-    }
-    
-    
-    /// Playback state
-    public var playbackState: PlaybackState = .stopped {
-        didSet {
-            if playbackState != oldValue {
-                delegate?.playerPlaybackStateDidChange?(self)
-            }
-        }
-    }
-    
-    
-    /// Buffer state
-    public var bufferingState: BufferingState = .unknown {
-        didSet {
-            if bufferingState != oldValue {
-                delegate?.playerBufferingStateDidChange?(self)
-            }
-        }
-    }
-    
-    
-    /// Whether player is playing
-    public var isPlaying: Bool {
-        if player.currentItem != nil, player.rate != 0 {
-            return true
-        }
-        return false
-    }
-    
-    /// Mutes audio playback when true.
-    public var isMuted: Bool {
+    /// 静音
+    public var muted: Bool {
         get {
             return player.isMuted
         }
@@ -177,9 +104,8 @@ public class ZHPlayer: NSObject {
             player.isMuted = newValue
         }
     }
-    
-    
-    /// Volume for the player, ranging from 0.0 to 1.0 on a linear scale.
+
+    /// 音量
     public var volume: Float {
         get {
             return player.volume
@@ -189,9 +115,7 @@ public class ZHPlayer: NSObject {
         }
     }
     
-    
-    /// Specifies how the video is displayed within a player layer’s bounds.
-    /// The default value is `AVLayerVideoGravityResizeAspect`. See `FillMode` enum.
+    /// 画面填充模式
     public var fillMode: AVLayerVideoGravity {
         get {
             return view.playerLayer.videoGravity
@@ -200,267 +124,304 @@ public class ZHPlayer: NSObject {
             view.playerLayer.videoGravity = newValue
         }
     }
+
+    /// 视频总时长
+    public var duration: TimeInterval {
+        get {
+            guard let playerItem = player.currentItem else {
+                return CMTimeGetSeconds(kCMTimeIndefinite)
+            }
+            return CMTimeGetSeconds(playerItem.duration)
+        }
+    }
     
+    /// 当前视频播放时间
+    public var currentTime: TimeInterval {
+        get {
+            guard let playerItem = player.currentItem else {
+                return CMTimeGetSeconds(kCMTimeIndefinite)
+            }
+            return CMTimeGetSeconds(playerItem.currentTime())
+        }
+    }
     
-    /// Player view's initial background color.
+    /// 视频的宽高
+    public var naturalSize: CGSize {
+        get {
+            guard let playerItem = player.currentItem, let track = playerItem.asset.tracks(withMediaType: .video).first else {
+                return .zero
+            }
+            let size = track.naturalSize.applying(track.preferredTransform)
+            return CGSize(width: fabs(size.width), height: fabs(size.height))
+        }
+    }
+    
+    /// 视频的背景颜色,默认黑色
     public var layerBackgroundColor: UIColor = .black {
         didSet {
-            view.playerLayer.backgroundColor = layerBackgroundColor.cgColor
+            view.layerColor = layerBackgroundColor
         }
     }
     
-    public var snapshotImage: UIImage? {
-        
-        guard let playerAsset = playerAsset,let playerItem = playerItem else { return nil }
-        
-        let imageGenerator = AVAssetImageGenerator(asset: playerAsset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        
-        do {
-            let cgImage = try imageGenerator.copyCGImage(at: playerItem.currentTime(), actualTime: nil)
-            return UIImage(cgImage: cgImage)
-        } catch {
-            return nil
-        }
-    }
-    
-    fileprivate var player: AVPlayer = AVPlayer()
-    fileprivate var playerItem: AVPlayerItem?
-    fileprivate var seekTime: CMTime?
-    fileprivate var timeObserver: Any?
-    fileprivate var playerAsset: AVAsset?
-
-    fileprivate var isComplete: Bool = false
-    
-    public override init() {
-        super.init()
-        view.playerLayer.backgroundColor = layerBackgroundColor.cgColor
-        player.actionAtItemEnd = .pause
-        installPlayerObservers()
-    }
-    
-    init(url: URL) {
-        super.init()
-        view.playerLayer.backgroundColor = layerBackgroundColor.cgColor
-        player.actionAtItemEnd = .pause
-        installPlayerObservers()
-        setup(url: url)
-    }
-    
-    deinit {
-        player.pause()
-        removePlayerObservers()
-        removePlayerItemObservers()
-        delegate = nil
-        print("player has deinit")
-    }
-    
-}
-
-
-// MARK: - Action
-public extension ZHPlayer {
-    
-    fileprivate func setup(url: URL) {
-        if self.playbackState == .playing {
-            player.pause()
-        }
-        configAsset(AVAsset(url: url))
-    }
-    
-    fileprivate func configAsset(_ asset: AVAsset) {
-        
-        if self.playbackState == .playing {
-            self.pause()
-        }
-        
-        isComplete = false
-        
-        playerAsset = asset
-    }
-    
-    fileprivate func configPlayerItem(_ item: AVPlayerItem) {
-        
-        removePlayerItemObservers()
-        
-        playerItem = item
-        
-        installPlayerItemObservers()
-        
-        player.replaceCurrentItem(with: item)
-    }
-    
-    public func prepareToPlay() {
-        
-        let keys = [PlayerViewConstKey.kPlayerTracks,PlayerViewConstKey.kPlayerPlayable,PlayerViewConstKey.kPlayerDuration]
-        
-        guard let playerAsset = playerAsset else { return }
-        
-        playerAsset.loadValuesAsynchronously(forKeys: keys, completionHandler: {
-            // Enum if error
-            for key in keys {
-                var error: NSError? = nil
-                let status = playerAsset.statusOfValue(forKey: key, error:&error)
-                if status == .failed {
-                    self.playbackState = .failed
-                    self.delegate?.playerDidPlayFinish?(self, error: error)
-                    return
-                }
-            }
-            if playerAsset.isPlayable {
-                self.configPlayerItem(AVPlayerItem(asset: playerAsset))
-            }
-            else {
-                self.playbackState = .failed
-
-                let info = [NSLocalizedFailureReasonErrorKey: "Asset can't play"]
-                let error = NSError(domain: "Asset Error", code: 501, userInfo: info)
-                self.delegate?.playerDidPlayFinish?(self, error: error)
-            }
-        })
-    }
-    
+    /// 播放
     public func play() {
-        if isComplete {
-            isComplete = false
-            seek(to: kCMTimeZero,completeHandler: nil)
-        }
+        guard let _ = player.currentItem else { return }
+        guard playbackState != .playing else { return }
+        playbackState = .playing
         player.play()
     }
     
+    /// 暂停
     public func pause() {
-        if playbackState != .playing { return }
+        guard playbackState != .pause else { return }
+        playbackState = .pause
         player.pause()
     }
     
-    public func seek(to time: CMTime,completeHandler: (()->Void)? = nil) {
+    /// 停止播放
+    public func stop() {
+        guard playbackState != .stopped else { return }
+        playbackState = .stopped
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        url = nil
+        error = nil
+    }
+    
+    /// 快进
+    public func seek(to time: CMTime, completionHandler: ((Bool) -> Swift.Void)? = nil) {
+        
         guard let playerItem = player.currentItem  else { return }
-        playerItem.seek(to: time) { (seeked) in
-            completeHandler?()
+        
+        bufferingState = .stalled
+        
+        playerItem.seek(to: time) { (finish) in
+            if finish { self.bufferingState = .through }
+            completionHandler?(finish)
         }
     }
     
+    /// 视频截图
+    public func takeSnapshot() -> UIImage {
+        UIGraphicsBeginImageContextWithOptions(view.bounds.size, false, UIScreen.main.scale)
+        view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return image!
+    }
+    
+    /// 错误信息
+    var error: Error?
+    
+    private let player = AVPlayer()
+    
+    private var _timeObserver: Any?
+    
+    public override init() {
+        super.init()
+        
+        view.layerColor = layerBackgroundColor
+        view.player = player
+
+        addPlayerObservers()
+        addApplicationObservers()
+    }
+    
+    deinit {
+        //移除定时器
+        if _timeObserver != nil {
+            player.removeTimeObserver(_timeObserver!)
+            _timeObserver = nil
+        }
+        //移除观察者对象
+        removeObservers()
+        //移除通知
+        NotificationCenter.default.removeObserver(self)
+        
+        print("ZHPlayer 销毁~")
+    }
 }
 
-fileprivate struct PlayerViewConstKey {
+private extension ZHPlayer {
     
-    static let kPlayerTracks = "tracks"
-    static let kPlayerPlayable = "playable"
-    static let kPlayerDuration = "duration"
-    
-    static let kPlayerRate = "rate"
-    static let kPlayerEmptyBuffer = "playbackBufferEmpty"
-    static let kPlayerKeepUp = "playbackLikelyToKeepUp"
-    static let kPlayerStatus = "status"
-    static let kPlayerLoadedTimeRanges = "loadedTimeRanges"
-}
-
-// MARK: - Observers
-extension ZHPlayer {
-    
-    func installPlayerObservers() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTimeMake(1, 60), queue: DispatchQueue.main) {[weak self] (time) in
-            guard let this = self else { return }
-            this.delegate?.playerPeriodicTimeDidChange?(this)
-        }
-        player.addObserver(self, forKeyPath: PlayerViewConstKey.kPlayerRate, options: [.new, .old], context: nil)
-    }
-    
-    func removePlayerObservers() {
-        if let timeObserver = timeObserver {
-            player.removeTimeObserver(timeObserver)
-        }
-        player.removeObserver(self, forKeyPath: PlayerViewConstKey.kPlayerRate)
-    }
-    
-    func installPlayerItemObservers() {
+    func validateAsset(_ asset: AVAsset) {
         
-        playerItem?.addObserver(self, forKeyPath: PlayerViewConstKey.kPlayerEmptyBuffer, options: ([.new, .old]), context: nil)
-        playerItem?.addObserver(self, forKeyPath: PlayerViewConstKey.kPlayerKeepUp, options: ([.new, .old]), context: nil)
-        playerItem?.addObserver(self, forKeyPath: PlayerViewConstKey.kPlayerStatus, options: ([.new, .old]), context: nil)
-        playerItem?.addObserver(self, forKeyPath: PlayerViewConstKey.kPlayerLoadedTimeRanges, options: ([.new, .old]), context: nil)
+        let keys = [PlayerKey.tracks, PlayerKey.playable, PlayerKey.duration]
         
-        if let playerItem = playerItem {
-            NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidPlayToEndTime(_:)), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-            NotificationCenter.default.addObserver(self, selector: #selector(playerItemFailedToPlayToEndTime(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
-        }
-
-    }
-    
-    func removePlayerItemObservers() {
-        
-        playerItem?.removeObserver(self, forKeyPath: PlayerViewConstKey.kPlayerEmptyBuffer, context: nil)
-        playerItem?.removeObserver(self, forKeyPath: PlayerViewConstKey.kPlayerKeepUp, context: nil)
-        playerItem?.removeObserver(self, forKeyPath: PlayerViewConstKey.kPlayerStatus, context: nil)
-        playerItem?.removeObserver(self, forKeyPath: PlayerViewConstKey.kPlayerLoadedTimeRanges, context: nil)
-        
-        if let playerItem = playerItem {
-            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
-        }
-
-    }
-    
-    public override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-        
-        if keyPath == PlayerViewConstKey.kPlayerKeepUp {
-            guard let item = playerItem,item.isPlaybackLikelyToKeepUp else { return }
-            bufferingState = .keepUp
-        }
-        else if keyPath == PlayerViewConstKey.kPlayerEmptyBuffer {
-            guard let item = playerItem,item.isPlaybackBufferEmpty else { return }
-            bufferingState = .stalled
-        }
-        else if keyPath == PlayerViewConstKey.kPlayerLoadedTimeRanges {
-            delegate?.playerBufferTimeDidChange?(self)
-        }
-        else if keyPath == PlayerViewConstKey.kPlayerStatus {
-            switch player.status {
-                case .readyToPlay:
-                    
-                    delegate?.playerReadyToPlay?(self)
-                    view.playerLayer.player = player
-                    
-                    guard shouldAutoplay else { return }
-                    play()
-                
-                case .failed:
-                    playbackState = .failed
-                    delegate?.playerDidPlayFinish?(self, error: player.error)
-                default:
-                    break
-            }
-        }
-        else if keyPath == PlayerViewConstKey.kPlayerRate {
+        asset.loadValuesAsynchronously(forKeys: keys, completionHandler: { () -> Void in
             
-            guard let url = url,isComplete == false else { return }
-            
-            if isPlaying {
-                playbackState = .playing
-            }
-            else {
-                guard let duration = duration else { return }
+            DispatchQueue.main.async {
                 
-                if currentTime < duration,url == (playerAsset as? AVURLAsset)?.url {
-                    playbackState = .paused
+                let deferror = NSError(domain: "Video resources are not available", code: 999, userInfo: [ NSLocalizedDescriptionKey : "Video resources are not available"])
+                
+                for key in keys {
+                    var error: NSError? = nil
+                    let status = asset.statusOfValue(forKey: key, error:&error)
+                    if status == .failed {
+                        self.error = error ?? deferror
+                        self.playbackState = .fail
+                    }
+                }
+                
+                if !asset.isPlayable {
+                    self.error = deferror
+                    self.playbackState = .fail
                 }
                 else {
-                    playbackState = .stopped
+                    
+                    self.error = nil
+                    self.bufferingState = .playable
+                    
+                    self.removeObservers()
+                    let playerItem = AVPlayerItem(asset:asset)
+                    self.registerObservers(playerItem)
+                    self.player.replaceCurrentItem(with: playerItem)
                 }
+            }
+            
+        })
+    }
+    
+}
+
+extension ZHPlayer {
+    //处理观察监听
+    override public func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        
+        guard let keyPath = keyPath, let item = player.currentItem else { return }
+        
+        if keyPath == PlayerKey.keepUp {
+            guard item.isPlaybackLikelyToKeepUp else { return }
+            self.bufferingState = .through
+            delegate?.playerBufferingStateDidChange?(self)
+            guard autoplay else { return }
+            player.play()
+        }
+        else if keyPath == PlayerKey.emptyBuffer {
+            guard item.isPlaybackBufferEmpty else { return }
+            self.bufferingState = .stalled
+            delegate?.playerBufferingStateDidChange?(self)
+            guard autoplay else { return }
+            player.pause()
+        }
+        else if keyPath == PlayerKey.loadedTime {
+            // 计算缓冲时间
+            let timeRanges = item.loadedTimeRanges
+            guard let timeRange = timeRanges.first?.timeRangeValue else { return }
+            
+            let bufferedTime = CMTimeGetSeconds(CMTimeAdd(timeRange.start, timeRange.duration))
+            delegate?.playerBufferTimeDidChange?(bufferedTime)
+        }
+        else if keyPath == PlayerKey.status {
+            
+            switch player.status {
+            case .failed:
+                let deferror = NSError(domain: "Video play failed!", code: 1999, userInfo: [ NSLocalizedDescriptionKey : "Video play failed!"])
+                self.error = player.error ?? deferror
+                playbackState = .fail
+                
+            case .readyToPlay:
+                delegate?.playerReady?(self)
+                // 判断是否自动播放
+                if autoplay {
+                    play()
+                }//判断缓冲状态
+                if bufferingState == .playable {
+                    bufferingState = .stalled
+                }
+                
+            case .unknown:
+                break
             }
             
         }
     }
     
-    @objc fileprivate func playerItemDidPlayToEndTime(_ aNotification: Notification) {
-        if isComplete { return }
-        isComplete = true
-        delegate?.playerDidPlayFinish?(self, error: nil)
+    //播放结束通知
+    @objc private func playerItemDidPlayToEndTime(_ aNotification: Notification) {
+        playbackState = .stopped
+        delegate?.playerPlaybackDidEnd?(self)
     }
     
-    @objc fileprivate func playerItemFailedToPlayToEndTime(_ aNotification: Notification) {
-        playbackState = .failed
-        delegate?.playerDidPlayFinish?(self, error: player.error)
+    //播放失败
+    @objc private func playerItemFailedToPlayToEndTime(_ aNotification: Notification) {
+        error = NSError(domain: "Player failed to play to end time!", code: 1999, userInfo: [ NSLocalizedDescriptionKey : "Player failed to play to end time!"])
+        playbackState = .fail
+    }
+}
+
+// MARK: - Observer & Notification
+private extension ZHPlayer {
+    
+    /// 监听视频的当前时间
+    func addPlayerObservers() {
+        self._timeObserver = player.addPeriodicTimeObserver(forInterval: CMTimeMake(1, 2), queue: DispatchQueue.main, using: { [weak self] timeInterval in
+            guard let this = self else { return }
+            this.delegate?.playerCurrentTimeDidChange?(this)
+        })
+    }
+    
+    /// 注册监听
+    func registerObservers(_ playerItem: AVPlayerItem) {
+        
+        playerItem.addObserver(self, forKeyPath: PlayerKey.emptyBuffer, options: [.new, .old], context: nil)
+        playerItem.addObserver(self, forKeyPath: PlayerKey.keepUp, options: [.new, .old], context: nil)
+        playerItem.addObserver(self, forKeyPath: PlayerKey.status, options: [.new, .old], context: nil)
+        playerItem.addObserver(self, forKeyPath: PlayerKey.loadedTime, options: [.new, .old], context: nil)
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidPlayToEndTime(_:)), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        NotificationCenter.default.addObserver(self, selector: #selector(playerItemFailedToPlayToEndTime(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
+        
+    }
+    
+    /// 移除监听
+    func removeObservers() {
+        
+        guard let playerItem = player.currentItem else { return }
+        
+        playerItem.removeObserver(self, forKeyPath: PlayerKey.emptyBuffer, context: nil)
+        playerItem.removeObserver(self, forKeyPath: PlayerKey.keepUp, context: nil)
+        playerItem.removeObserver(self, forKeyPath: PlayerKey.status, context: nil)
+        playerItem.removeObserver(self, forKeyPath: PlayerKey.loadedTime, context: nil)
+        
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
+    }
+    
+    /// 系统时间监听
+    func addApplicationObservers() {
+        NotificationCenter.default.addObserver(self, selector: #selector(handleApplicationWillResignActive(_:)), name: .UIApplicationWillResignActive, object: UIApplication.shared)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleApplicationDidBecomeActive(_:)), name: .UIApplicationDidBecomeActive, object: UIApplication.shared)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleApplicationDidEnterBackground(_:)), name: .UIApplicationDidEnterBackground, object: UIApplication.shared)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleApplicationWillEnterForeground(_:)), name: .UIApplicationWillEnterForeground, object: UIApplication.shared)
+    }
+    
+    @objc func handleApplicationWillResignActive(_ aNotification: Notification) {
+
+        guard self.playbackState == .playing && self.pausesWhenResigningActive else { return }
+        
+        self.pause()
+    }
+    
+    @objc func handleApplicationDidBecomeActive(_ aNotification: Notification) {
+        
+        guard self.playbackState != .playing && self.resumesWhenBecameActive else { return }
+        
+        self.play()
+    }
+    
+    @objc func handleApplicationDidEnterBackground(_ aNotification: Notification) {
+        
+        guard self.playbackState == .playing && self.pausesWhenBackgrounded else { return }
+        
+        self.pause()
+    }
+    
+    @objc func handleApplicationWillEnterForeground(_ aNoticiation: Notification) {
+        
+        guard self.playbackState != .playing && self.resumesWhenEnteringForeground else { return }
+        
+        self.play()
     }
     
 }
@@ -479,8 +440,25 @@ public class ZHPlayerView: UIView {
         }
     }
     
-    deinit {
-        playerLayer.player?.pause()
-        playerLayer.player = nil
+    public var layerColor: UIColor? {
+        get {
+            guard let cgColor = playerLayer.backgroundColor else { return nil }
+            return  UIColor(cgColor: cgColor)
+        }
+        set {
+            guard let value = newValue else { return }
+            playerLayer.backgroundColor = value.cgColor
+        }
     }
+    
+    public var player: AVPlayer? {
+        get {
+            return self.playerLayer.player
+        }
+        set {
+            self.playerLayer.player = newValue
+        }
+    }
+    
 }
+
